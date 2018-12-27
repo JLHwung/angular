@@ -7,8 +7,8 @@
 */
 
 import {Compiler, Injectable, Injector, NgModuleFactoryLoader, NgModuleRef, OnDestroy} from '@angular/core';
-import {Observable, Subscription, from, of } from 'rxjs';
-import {catchError, concatMap, filter, map, mergeAll, mergeMap} from 'rxjs/operators';
+import {Observable, Subject, from, of } from 'rxjs';
+import {catchError, concatMap, filter, map, mergeAll, mergeMap, takeUntil} from 'rxjs/operators';
 
 import {LoadedRouterConfig, Route, Routes} from './config';
 import {Event, NavigationEnd, RouteConfigLoadEnd, RouteConfigLoadStart} from './events';
@@ -72,8 +72,7 @@ export class NoPreloading implements PreloadingStrategy {
 @Injectable()
 export class RouterPreloader implements OnDestroy {
   private loader: RouterConfigLoader;
-  // TODO(issue/24571): remove '!'.
-  private subscription !: Subscription;
+  private destroyed = new Subject<void>();
 
   constructor(
       private router: Router, moduleLoader: NgModuleFactoryLoader, compiler: Compiler,
@@ -85,10 +84,11 @@ export class RouterPreloader implements OnDestroy {
   }
 
   setUpPreloading(): void {
-    this.subscription =
-        this.router.events
-            .pipe(filter((e: Event) => e instanceof NavigationEnd), concatMap(() => this.preload()))
-            .subscribe(() => {});
+    this.router.events
+        .pipe(
+            filter((e: Event) => e instanceof NavigationEnd), concatMap(() => this.preload()),
+            takeUntil(this.destroyed))
+        .subscribe(() => {});
   }
 
   preload(): Observable<any> {
@@ -96,10 +96,10 @@ export class RouterPreloader implements OnDestroy {
     return this.processRoutes(ngModule, this.router.config);
   }
 
-  // TODO(jasonaden): This class relies on code external to the class to call setUpPreloading. If
-  // this hasn't been done, ngOnDestroy will fail as this.subscription will be undefined. This
-  // should be refactored.
-  ngOnDestroy(): void { this.subscription.unsubscribe(); }
+  ngOnDestroy(): void {
+    this.destroyed.next();
+    this.destroyed.complete();
+  }
 
   private processRoutes(ngModule: NgModuleRef<any>, routes: Routes): Observable<void> {
     const res: Observable<any>[] = [];
